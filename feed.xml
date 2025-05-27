@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="3.10.0">Jekyll</generator><link href="/blog/feed.xml" rel="self" type="application/atom+xml" /><link href="/blog/" rel="alternate" type="text/html" /><updated>2025-05-27T08:31:15+02:00</updated><id>/blog/feed.xml</id><title type="html">Jan Kokemüller</title><author><name>Jan Kokemüller</name></author><entry><title type="html">What Is the Value of `std::indirect`?</title><link href="/blog/c++/2025/05/27/value-of-std-indirect" rel="alternate" type="text/html" title="What Is the Value of `std::indirect`?" /><published>2025-05-27T00:00:00+02:00</published><updated>2025-05-27T00:00:00+02:00</updated><id>/blog/c++/2025/05/27/value-of-std-indirect</id><content type="html" xml:base="/blog/c++/2025/05/27/value-of-std-indirect"><![CDATA[<script src="/blog/assets/js/mermaid.min.js" defer=""></script>
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="3.10.0">Jekyll</generator><link href="/blog/feed.xml" rel="self" type="application/atom+xml" /><link href="/blog/" rel="alternate" type="text/html" /><updated>2025-05-27T16:53:21+02:00</updated><id>/blog/feed.xml</id><title type="html">Jan Kokemüller</title><author><name>Jan Kokemüller</name></author><entry><title type="html">What Is the Value of `std::indirect`?</title><link href="/blog/c++/2025/05/27/value-of-std-indirect" rel="alternate" type="text/html" title="What Is the Value of `std::indirect`?" /><published>2025-05-27T00:00:00+02:00</published><updated>2025-05-27T00:00:00+02:00</updated><id>/blog/c++/2025/05/27/value-of-std-indirect</id><content type="html" xml:base="/blog/c++/2025/05/27/value-of-std-indirect"><![CDATA[<script src="/blog/assets/js/mermaid.min.js" defer=""></script>
 
 <script type="module">
   document.querySelectorAll(".language-mermaid").forEach(e => e.parentNode.replaceWith(Object.assign((function () {
@@ -11,8 +11,10 @@
 <p>tl;dr: It’s just a <code class="language-plaintext highlighter-rouge">T</code>! Not a <code class="language-plaintext highlighter-rouge">optional&lt;T&gt;</code>.</p>
 
 <p><code class="language-plaintext highlighter-rouge">std::indirect&lt;T&gt;</code> is a new class template in C++26. It wraps an object of type
-<code class="language-plaintext highlighter-rouge">T</code>, providing value-like semantics. This object is allocated on the heap,
-unlike other wrappers like <code class="language-plaintext highlighter-rouge">std::optional</code>.</p>
+<code class="language-plaintext highlighter-rouge">T</code>, providing value-like semantics. The <code class="language-plaintext highlighter-rouge">T</code> is allocated on the heap,
+unlike other wrappers like <code class="language-plaintext highlighter-rouge">std::optional</code>. This can be useful if <code class="language-plaintext highlighter-rouge">T</code> is an
+incomplete type (as is the case with the PIMPL pattern) or if you want to
+reduce the object size.</p>
 
 <p>How is it different from <code class="language-plaintext highlighter-rouge">std::unique_ptr&lt;T&gt;</code> then? <code class="language-plaintext highlighter-rouge">std::unique_ptr</code> has
 pointer semantics:</p>
@@ -538,7 +540,7 @@ check for the valueless state. If you absolutely need to deal with valueless
 
 <p>Knowing which values a type can hold is essential for reasoning about code.</p>
 
-<hr />
+<hr style="margin: 40px 0" />
 
 <div class="footnotes" role="doc-endnotes">
   <ol>

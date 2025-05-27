@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/blog/assets/main.css"><link type="application/atom+xml" rel="alternate" href="/blog/feed.xml" title="Jan Kokemüller" /></head>
+<body><header class="site-header" role="banner">
+
+  <div class="wrapper"><a class="site-title" rel="author" href="/blog/">Jan Kokemüller</a><nav class="site-nav">
+        <input type="checkbox" id="nav-trigger" class="nav-trigger" />
+        <label for="nav-trigger">
+          <span class="menu-icon">
+            <svg viewBox="0 0 18 15" width="18px" height="15px">
+              <path d="M18,1.484c0,0.82-0.665,1.484-1.484,1.484H1.484C0.665,2.969,0,2.304,0,1.484l0,0C0,0.665,0.665,0,1.484,0 h15.032C17.335,0,18,0.665,18,1.484L18,1.484z M18,7.516C18,8.335,17.335,9,16.516,9H1.484C0.665,9,0,8.335,0,7.516l0,0 c0-0.82,0.665-1.484,1.484-1.484h15.032C17.335,6.031,18,6.696,18,7.516L18,7.516z M18,13.516C18,14.335,17.335,15,16.516,15H1.484 C0.665,15,0,14.335,0,13.516l0,0c0-0.82,0.665-1.483,1.484-1.483h15.032C17.335,12.031,18,12.695,18,13.516L18,13.516z"/>
+            </svg>
+          </span>
+        </label>
+
+        <div class="trigger"></div>
+      </nav></div>
+</header>
+<main class="page-content" aria-label="Content">
+      <div class="wrapper">
+        <article class="post h-entry" itemscope itemtype="http://schema.org/BlogPosting">
+
+  <header class="post-header">
+    <h1 class="post-title p-name" itemprop="name headline">What Is the Value of <code class="language-plaintext highlighter-rouge">std::indirect&lt;T&gt;</code>?
+</h1>
+    <p class="post-meta">
+      <time class="dt-published" datetime="2025-05-27T00:00:00+02:00" itemprop="datePublished">2025-05-27
+      </time></p>
+  </header>
+
+  <div class="post-content e-content" itemprop="articleBody">
+    <script src="/blog/assets/js/mermaid.min.js" defer=""></script>
+
+<script type="module">
+  document.querySelectorAll(".language-mermaid").forEach(e => e.parentNode.replaceWith(Object.assign((function () {
+    var el = document.createElement("pre")
+    el.className = "mermaid"
+    return el
+  })(), {innerHTML: e.innerHTML})));
+</script>
+
+<p>tl;dr: It’s just a <code class="language-plaintext highlighter-rouge">T</code>! Not a <code class="language-plaintext highlighter-rouge">optional&lt;T&gt;</code>.</p>
+
+<p><code class="language-plaintext highlighter-rouge">std::indirect&lt;T&gt;</code> is a new class template in C++26. It wraps an object of type
+<code class="language-plaintext highlighter-rouge">T</code>, providing value-like semantics. This object is allocated on the heap,
+unlike other wrappers like <code class="language-plaintext highlighter-rouge">std::optional</code>.</p>
+
+<p>How is it different from <code class="language-plaintext highlighter-rouge">std::unique_ptr&lt;T&gt;</code> then? <code class="language-plaintext highlighter-rouge">std::unique_ptr</code> has
+pointer semantics:</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">operator=</code> moves the pointer</li>
+  <li><code class="language-plaintext highlighter-rouge">operator==</code> compares the pointer</li>
+</ul>
+
+<p>i.e. the <em>value</em> of a <code class="language-plaintext highlighter-rouge">std::unique_ptr</code> is the <em>pointer</em> to the managed object,
+not the object itself.</p>
+
+<p>The values of a <code class="language-plaintext highlighter-rouge">std::indirect&lt;T&gt;</code> on the other hand are exactly the values of
+the managed object itself:</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">operator=</code> copies/moves the <code class="language-plaintext highlighter-rouge">T</code> object</li>
+  <li><code class="language-plaintext highlighter-rouge">operator==</code> compares the <code class="language-plaintext highlighter-rouge">T</code> object</li>
+</ul>
+
+<p>There is <em>one</em> small problem though: Moving from a <code class="language-plaintext highlighter-rouge">std::indirect&lt;T&gt;</code> leaves it
+in a “valueless” state. This makes sense in a way: Under the hood,
+<code class="language-plaintext highlighter-rouge">std::indirect</code> is implemented as a pointer to the managed object. Moving it
+will just assign this pointer to the other object, and set the source pointer
+to <code class="language-plaintext highlighter-rouge">nullptr</code>. Otherwise, moving the object would have to create a new “valid”
+object in the empty source object, incurring a heap allocation which we would
+like to avoid.</p>
+
+<p>Should you be in any way concerned though? The answer is no: While there is a
+member function <code class="language-plaintext highlighter-rouge">valueless_after_move()</code> which you can use to check for this
+empty state, you should <em>never</em> have to call it. Structure your program in such
+a way that you never need to look at moved from objects. Functions that take
+a <code class="language-plaintext highlighter-rouge">std::indirect&lt;T&gt;</code> as an argument should have an implicit precondition that
+the argument is <em>not</em> “valueless after move”:</p>
+
+<div class="language-c++ highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kt">void</span> <span class="nf">f</span><span class="p">(</span><span class="k">const</span> <span class="n">std</span><span class="o">::</span><span class="n">indirect</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;&amp;</span> <span class="n">i</span><span class="p">)</span> <span class="p">{</span>
+    <span class="c1">// Do _not_ check for `valueless_after_move()` here!</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<h2 id="is-stdindirectt-confused-about-what-it-is">Is <code class="language-plaintext highlighter-rouge">std::indirect&lt;T&gt;</code> confused about what it <em>is</em>?</h2>
+
+<p>Above I said that the possible <em>values</em> of <code class="language-plaintext highlighter-rouge">std::indirect&lt;T&gt;</code> are <em>exactly</em>
+the possible values of <code class="language-plaintext highlighter-rouge">T</code>. Is this true though? Let’s take a short detour and
+talk about values.</p>
+
+<p>The meaning of <em>value</em> is central to C++ and programming in general. From
+<a href="https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2007/n2479.pdf">n2479</a>:</p>
+
+<blockquote>
+  <p><strong>value</strong> <br />
+a notion of a unique abstract entity in a mathematical type system.</p>
+</blockquote>
+
+<p>A <em>type</em> then is a set of values. In addition, in order to represent values in
+memory, there must be a mapping from bit patterns to those values. This mapping
+can be interpreted as a mathematical function that is partial (meaning that not
+all possible bit patterns must map to a value) and surjective (meaning that every
+value is represented by <em>at least</em> one bit pattern, but there may be multiple
+bit patterns that represent the same value).
+<a href="https://www.elementsofprogramming.com/eop.pdf">Elements of Programming</a>
+calls this mapping a <em>value type</em> (not to be confused with the
+<a href="https://en.wikipedia.org/wiki/Value_type_and_reference_type">colloquial use</a>
+of the term!).</p>
+
+<p>To make matters more complex, the bit patterns (or <em>datums</em>) that represent
+values are often not laid out contiguously in memory, but mixed with
+padding bytes or even split up between stack and heap (as is the case for
+<code class="language-plaintext highlighter-rouge">std::vector&lt;T&gt;</code>). Endianness comes into play as well. But in theory, you could
+collect all the bits that participate in representing the value from an object
+by following all the pointers, skipping padding or “unimportant” elements, and
+serialize them. EOP calls this mapping of a value type to concrete objects an
+<em>object type</em>.</p>
+
+<p>Let’s have a look at a few examples. Here is <code class="language-plaintext highlighter-rouge">int</code> (for a 32-bit, little endian
+machine that uses two’s complement). <code class="language-plaintext highlighter-rouge">int</code> models the mathematical integers (ℤ).</p>
+
+<pre><code class="language-mermaid">block-beta
+    columns 6
+
+    o1["values:"]:1
+    block:group2:5
+      space
+      o1v0["-2147483648"]
+      o1v1["..."]
+      o1v2["-1"]
+      o1v3["0"]
+      o1v4["1"]
+      o1v5["..."]
+      o1v6["2147483647"]
+    end
+
+    o2["value type"]:1
+    block:group3:5
+      space
+      o2v0["0x80000000"]
+      o2v1["..."]
+      o2v2["0xFFFFFFFF"]
+      o2v3["0x00000000"]
+      o2v4["0x00000001"]
+      o2v5["..."]
+      o2v6["0x7FFFFFFF"]
+    end
+
+    o3["object type\n(little endian)"]:1
+    block:group4:5
+      o3ve["erroneous"]
+      o3v0["0x00000080"]
+      o3v1["..."]
+      o3v2["0xFFFFFFFF"]
+      o3v3["0x00000000"]
+      o3v4["0x01000000"]
+      o3v5["..."]
+      o3v6["0xFFFFFF7F"]
+    end
+
+    o2v0--&gt;o1v0
+    o2v2--&gt;o1v2
+    o2v3--&gt;o1v3
+    o2v4--&gt;o1v4
+    o2v6--&gt;o1v6
+
+    o3v0--&gt;o2v0
+    o3v2--&gt;o2v2
+    o3v3--&gt;o2v3
+    o3v4--&gt;o2v4
+    o3v6--&gt;o2v6
+
+    style o1    fill:#fff0,stroke:#fff0
+    style o2    fill:#fff0,stroke:#fff0
+    style o3    fill:#fff0,stroke:#fff0
+    style o1v1  fill:#fff0,stroke:#fff0
+    style o1v5  fill:#fff0,stroke:#fff0
+    style o2v1  fill:#fff0,stroke:#fff0
+    style o2v5  fill:#fff0,stroke:#fff0
+    style o3v1  fill:#fff0,stroke:#fff0
+    style o3v5  fill:#fff0,stroke:#fff0
+</code></pre>
+
+<p>One interesting observation is the “erroneous” state. This is the default
+constructed state of an <code class="language-plaintext highlighter-rouge">int</code> where it holds no value and has no meaning:</p>
+
+<div class="language-c++ highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kt">int</span> <span class="n">i</span><span class="p">;</span> <span class="c1">// holds no value</span>
+</code></pre></div></div>
+
+<p>In this state, the <code class="language-plaintext highlighter-rouge">int</code> can only be assigned to and destroyed. In particular,
+calling equality and comparison operators with such objects is not defined since
+they operate on values, just like in math.</p>
+
+<p>A more complex example is <code class="language-plaintext highlighter-rouge">float</code>, which models the extended real numbers:</p>
+
+<pre><code class="language-mermaid">block-beta
+    columns 6
+
+    o1["values:"]:1
+    block:group2:5
+      space
+      space
+      o1v0["-∞"]
+      o1v1["..."]
+      o1v2["-1.0"]
+      o1v3["..."]
+      o1v4["0.0"]
+      o1v5["..."]
+      o1v6["1.0"]
+      o1v7["..."]
+      o1v8["∞"]
+    end
+
+    o2["value type"]:1
+    block:group3:5
+      space
+      space
+      o2v0["0xFF80-\n0000"]
+      o2v1["..."]
+      o2v2["0xBF80-\n0000"]
+      o2v3["..."]
+      o2v4a["0x8000-\n0000"]
+      o2v4b["0x0000-\n0000"]
+      o2v5["..."]
+      o2v6["0x7FFF-\nFFFF"]
+      o2v7["..."]
+      o2v8["0x7F80-\n0000"]
+    end
+
+    o3["object type\n(little endian)"]:1
+    block:group4:5
+      o3ve["erroneous"]
+      o3vn["NaN \n(many)"]
+      o3v0["0x0000-\n80FF"]
+      o3v1["..."]
+      o3v2["0x0000-\n80BF"]
+      o3v3["..."]
+      o3v4a["0x0000-\n0080"]
+      o3v4b["0x0000-\n0000"]
+      o3v5["..."]
+      o3v6["0xFFFF-\nFF7F"]
+      o3v7["..."]
+      o3v8["0x8000-\n007F"]
+    end
+
+    o2v0--&gt;o1v0
+    o2v2--&gt;o1v2
+    o2v4a--&gt;o1v4
+    o2v4b--&gt;o1v4
+    o2v6--&gt;o1v6
+    o2v8--&gt;o1v8
+
+    o3v0 --&gt; o2v0
+    o3v2 --&gt; o2v2
+    o3v4a--&gt; o2v4a
+    o3v4b--&gt; o2v4b
+    o3v6 --&gt; o2v6
+    o3v8 --&gt; o2v8
+
+    style o1    fill:#fff0,stroke:#fff0
+    style o2    fill:#fff0,stroke:#fff0
+    style o3    fill:#fff0,stroke:#fff0
+    style o1v1  fill:#fff0,stroke:#fff0
+    style o1v3  fill:#fff0,stroke:#fff0
+    style o1v5  fill:#fff0,stroke:#fff0
+    style o1v7  fill:#fff0,stroke:#fff0
+    style o2v1  fill:#fff0,stroke:#fff0
+    style o2v3  fill:#fff0,stroke:#fff0
+    style o2v5  fill:#fff0,stroke:#fff0
+    style o2v7  fill:#fff0,stroke:#fff0
+    style o3v1  fill:#fff0,stroke:#fff0
+    style o3v3  fill:#fff0,stroke:#fff0
+    style o3v5  fill:#fff0,stroke:#fff0
+    style o3v7  fill:#fff0,stroke:#fff0
+</code></pre>
+
+<p>In addition to an erroneous state <code class="language-plaintext highlighter-rouge">float</code> can hold many bit patterns
+that mean “not a number”. It would have been fine to leave <code class="language-plaintext highlighter-rouge">operator==</code>
+undefined for those like for the erroneous state, but the designers of IEEE-754
+decided to “fill the semantic hole” and always return <code class="language-plaintext highlighter-rouge">false</code> when a NaN is
+compared with another float <sup id="fnref:1" role="doc-noteref"><a href="#fn:1" class="footnote" rel="footnote">1</a></sup>.</p>
+
+<p>Also, zero is special. There are two bit patterns that map to it: One for
+<code class="language-plaintext highlighter-rouge">-0.0f</code> and one for <code class="language-plaintext highlighter-rouge">0.0f</code>. Both represent the same mathematical zero, and
+<code class="language-plaintext highlighter-rouge">operator==</code> respects this. Some functions, such as division, will behave
+differently when called with the different representations, however. A function
+like this is not “regular” (using the definition from EOP) or
+“equality-preserving” (a term from the C++ standard).</p>
+
+<p>Again, there is (or should be) an implicit precondition for every function
+taking an <code class="language-plaintext highlighter-rouge">int</code> or <code class="language-plaintext highlighter-rouge">float</code> as an argument that it represents a value (i.e. is
+neither erroneous nor NaN):</p>
+
+<div class="language-c++ highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kt">void</span> <span class="nf">f</span><span class="p">(</span><span class="k">const</span> <span class="kt">int</span><span class="o">&amp;</span> <span class="n">i</span><span class="p">)</span> <span class="p">{</span>
+    <span class="c1">// Can assume `i` is valid.</span>
+<span class="p">}</span>
+
+<span class="kt">void</span> <span class="n">g</span><span class="p">(</span><span class="k">const</span> <span class="kt">float</span><span class="o">&amp;</span> <span class="n">f</span><span class="p">)</span> <span class="p">{</span>
+    <span class="c1">// Can assume `f` represents a valid extended real, i.e. is not erroneous or NaN.</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>If a function is equipped to deal with NaNs, it should document this explicitly.</p>
+
+<p>OK, now let’s have a look at <code class="language-plaintext highlighter-rouge">std::indirect&lt;int&gt;</code>:</p>
+
+<pre><code class="language-mermaid">block-beta
+    columns 6
+
+    o1["values:"]:1
+    block:group2:5
+      space
+      o1v0["-2147483648"]
+      o1v1["..."]
+      o1v2["-1"]
+      o1v3["0"]
+      o1v4["1"]
+      o1v5["..."]
+      o1v6["2147483647"]
+    end
+
+    o2["value type"]:1
+    block:group3:5
+      space
+      o2v0["0x80000000"]
+      o2v1["..."]
+      o2v2["0xFFFFFFFF"]
+      o2v3["0x00000000"]
+      o2v4["0x00000001"]
+      o2v5["..."]
+      o2v6["0x7FFFFFFF"]
+    end
+
+    o3["object type\n(little endian)"]:1
+    block:group4:5
+      o3ve["&lt;code&gt;nullptr&lt;/code&gt;\n(valueless\nafter move)"]
+      o3v0["ptr→\n0x00000080"]
+      o3v1["..."]
+      o3v2["ptr→\n0xFFFFFFFF"]
+      o3v3["ptr→\n0x00000000"]
+      o3v4["ptr→\n0x01000000"]
+      o3v5["..."]
+      o3v6["ptr→\n0xFFFFFF7F"]
+    end
+
+    o2v0--&gt;o1v0
+    o2v2--&gt;o1v2
+    o2v3--&gt;o1v3
+    o2v4--&gt;o1v4
+    o2v6--&gt;o1v6
+
+    o3v0--&gt;o2v0
+    o3v2--&gt;o2v2
+    o3v3--&gt;o2v3
+    o3v4--&gt;o2v4
+    o3v6--&gt;o2v6
+
+    style o1    fill:#fff0,stroke:#fff0
+    style o2    fill:#fff0,stroke:#fff0
+    style o3    fill:#fff0,stroke:#fff0
+    style o1v1  fill:#fff0,stroke:#fff0
+    style o1v5  fill:#fff0,stroke:#fff0
+    style o2v1  fill:#fff0,stroke:#fff0
+    style o2v5  fill:#fff0,stroke:#fff0
+    style o3v1  fill:#fff0,stroke:#fff0
+    style o3v5  fill:#fff0,stroke:#fff0
+</code></pre>
+
+<p>The erroneous state is not present anymore, since <code class="language-plaintext highlighter-rouge">std::indirect</code> always
+value-initializes the wrapped object.</p>
+
+<p>More interesting is the introduction of the “valueless after move” state. This
+state does not carry any meaning. You would assume that functions like
+<code class="language-plaintext highlighter-rouge">operator==</code> or the comparison functions would have a precondition that the
+object is not in this “valueless after move” state. And indeed, in
+<a href="https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2023/p3019r3.html">p3019r3</a>
+we can find wording to that effect:</p>
+
+<blockquote>
+  <p>X.Y.8 Relational operators [indirect.rel]</p>
+  <div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>template &lt;class U, class AA&gt;
+constexpr auto operator==(const indirect&amp; lhs, const indirect&lt;U, AA&gt;&amp; rhs)
+noexcept(noexcept(*lhs == *rhs));
+</code></pre></div>  </div>
+  <p>[…]</p>
+
+  <p>2. Preconditions: <code class="language-plaintext highlighter-rouge">lhs</code> is not valueless, <code class="language-plaintext highlighter-rouge">rhs</code> is not valueless.<br />
+3. Effects: Returns <code class="language-plaintext highlighter-rouge">*lhs op *rhs</code>.</p>
+</blockquote>
+
+<p>Contrast with the accepted
+<a href="https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2025/p3019r13.html">p3019r13</a>:</p>
+
+<blockquote>
+  <p>X.Y.8 Relational operators [indirect.relops]</p>
+  <div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>template &lt;class U, class AA&gt;
+constexpr bool operator==(const indirect&amp; lhs, const indirect&lt;U, AA&gt;&amp; rhs)
+noexcept(noexcept(*lhs == *rhs));
+</code></pre></div>  </div>
+  <p>[…]</p>
+
+  <p>2. Returns: If <code class="language-plaintext highlighter-rouge">lhs</code> is valueless or <code class="language-plaintext highlighter-rouge">rhs</code> is valueless,
+<code class="language-plaintext highlighter-rouge">lhs.valueless_after_move() == rhs.valueless_after_move()</code>; otherwise <code class="language-plaintext highlighter-rouge">*lhs == *rhs</code>.</p>
+</blockquote>
+
+<p>The preconditions have been dropped. “Valueless” <code class="language-plaintext highlighter-rouge">indirect</code>s are now guaranteed
+to compare equal. Similarly, they will be ordered before any “valueful”
+<code class="language-plaintext highlighter-rouge">indirect</code> by <code class="language-plaintext highlighter-rouge">operator&lt;=&gt;</code>.</p>
+
+<p>I think this raises interesting questions. Is the “valueless after move” state
+now considered to be a proper <em>value</em> of <code class="language-plaintext highlighter-rouge">std::indirect&lt;T&gt;</code>? If not, is it still
+a conceptual error to call <code class="language-plaintext highlighter-rouge">operator==</code> and friends even though their behavior
+is now well defined? Is there any (generic) code that may call functions on
+valueless <code class="language-plaintext highlighter-rouge">indirect</code>s?</p>
+
+<p>p3019r13 has this to say:</p>
+
+<blockquote>
+  <p>While the notion that a valueless <code class="language-plaintext highlighter-rouge">indirect</code> or <code class="language-plaintext highlighter-rouge">polymorphic</code> is
+toxic and must not be passed around code is appealing, it would not interact
+well with generic code which may need to handle a variety of types. […] We
+opt for consistency with existing standard library types (namely <code class="language-plaintext highlighter-rouge">variant</code>, which
+has a valueless state) and allow copy, move, assignment and move assignment of a
+valueless <code class="language-plaintext highlighter-rouge">indirect</code> and <code class="language-plaintext highlighter-rouge">polymorphic</code>.</p>
+</blockquote>
+
+<p>When I read this I wondered why generic code would have to access the moved
+from state. I’m very interested in some piece of generic code that actually has
+a good reason to execute those code paths.</p>
+
+<p>The best answer I found is
+<a href="https://old.reddit.com/r/cpp/comments/6u34lj/thoughts_on_default_construction/dlr2wtz/">this Reddit comment</a>
+by Howard Hinnant:</p>
+
+<blockquote>
+  <p>A valid and correct sort algorithm could move from an object and then compare
+it with itself. This would not be an optimal algorithm, but it would be
+legal. Stranger things have happened. One implementation of <code class="language-plaintext highlighter-rouge">std::reverse</code> once
+swapped the middle element of an odd-numbered sequence with itself. Smart?
+Not really. Correct? Yes. Legal? Yes.</p>
+</blockquote>
+
+<p>So this is the reason why the “regular” operations (copy, move, comparisons)
+should have defined semantics on a moved from object. I would count <code class="language-plaintext highlighter-rouge">std::hash</code>
+in as well <sup id="fnref:2" role="doc-noteref"><a href="#fn:2" class="footnote" rel="footnote">2</a></sup>. But this is just a concession to code that doesn’t behave very
+well. <em>You</em> should treat those operations as being undefined!</p>
+
+<p>What about other operations, such as formatting? Should they return something
+valid for the moved from state as well? The next paragraph from p3019r13 gives
+a sad answer:</p>
+
+<blockquote>
+  <p>Like <code class="language-plaintext highlighter-rouge">variant</code>, <code class="language-plaintext highlighter-rouge">indirect</code> does not support formatting by forwarding to the owned
+object. There may be no owned object to format so we require the user to write
+code to determine how to format a valueless <code class="language-plaintext highlighter-rouge">indirect</code> or to validate that the
+<code class="language-plaintext highlighter-rouge">indirect</code> is not valueless before formatting <code class="language-plaintext highlighter-rouge">*i</code> (where <code class="language-plaintext highlighter-rouge">i</code> is an instance of
+<code class="language-plaintext highlighter-rouge">indirect</code> for some formattable type <code class="language-plaintext highlighter-rouge">T</code>).</p>
+</blockquote>
+
+<p>I think this is needlessly pessimistic. <code class="language-plaintext highlighter-rouge">indirect&lt;T&gt;</code> is a type that holds the
+<em>same</em> values as <code class="language-plaintext highlighter-rouge">T</code>. You should never even end up in a situation where the
+<code class="language-plaintext highlighter-rouge">indirect&lt;T&gt;</code> you are trying to format is potentially “valueless”.</p>
+
+<p>This line of reasoning would only make sense if the value set of <code class="language-plaintext highlighter-rouge">indirect&lt;T&gt;</code>
+is <em>not</em> the same as the one of <code class="language-plaintext highlighter-rouge">T</code>, but instead “the values of <code class="language-plaintext highlighter-rouge">T</code> plus one
+‘valueless value’”:</p>
+
+<pre><code class="language-mermaid">block-beta
+    columns 6
+
+    o1["values:"]:1
+    block:group2:5
+      o1ve["&amp;empty;"]
+      o1v0["-2147483648"]
+      o1v1["..."]
+      o1v2["-1"]
+      o1v3["0"]
+      o1v4["1"]
+      o1v5["..."]
+      o1v6["2147483647"]
+    end
+
+    o2["value type"]:1
+    block:group3:5
+      o2ve["0x000000000"]
+      o2v0["0x180000000"]
+      o2v1["..."]
+      o2v2["0x1FFFFFFFF"]
+      o2v3["0x100000000"]
+      o2v4["0x100000001"]
+      o2v5["..."]
+      o2v6["0x17FFFFFFF"]
+    end
+
+    o3["object type\n(little endian)"]:1
+    block:group4:5
+      o3ve["&lt;code&gt;nullptr&lt;/code&gt;\n(valueless\nafter move)"]
+      o3v0["ptr→\n0x00000080"]
+      o3v1["..."]
+      o3v2["ptr→\n0xFFFFFFFF"]
+      o3v3["ptr→\n0x00000000"]
+      o3v4["ptr→\n0x01000000"]
+      o3v5["..."]
+      o3v6["ptr→\n0xFFFFFF7F"]
+    end
+
+    o2ve--&gt;o1ve
+    o2v0--&gt;o1v0
+    o2v2--&gt;o1v2
+    o2v3--&gt;o1v3
+    o2v4--&gt;o1v4
+    o2v6--&gt;o1v6
+
+    o3ve--&gt;o2ve
+    o3v0--&gt;o2v0
+    o3v2--&gt;o2v2
+    o3v3--&gt;o2v3
+    o3v4--&gt;o2v4
+    o3v6--&gt;o2v6
+
+    style o1    fill:#fff0,stroke:#fff0
+    style o2    fill:#fff0,stroke:#fff0
+    style o3    fill:#fff0,stroke:#fff0
+    style o1v1  fill:#fff0,stroke:#fff0
+    style o1v5  fill:#fff0,stroke:#fff0
+    style o2v1  fill:#fff0,stroke:#fff0
+    style o2v5  fill:#fff0,stroke:#fff0
+    style o3v1  fill:#fff0,stroke:#fff0
+    style o3v5  fill:#fff0,stroke:#fff0
+</code></pre>
+
+<p>In this case, encountering a “valueless” <code class="language-plaintext highlighter-rouge">indirect&lt;T&gt;</code> would be perfectly
+normal, in the same way as encountering an empty <code class="language-plaintext highlighter-rouge">std::optional&lt;T&gt;</code> is.</p>
+
+<p>But because <code class="language-plaintext highlighter-rouge">indirect&lt;T&gt;</code> is not like this, throwing an exception when trying
+to format a moved from <code class="language-plaintext highlighter-rouge">indirect&lt;T&gt;</code> would be perfectly fine (and still satisfy
+the
+<a href="https://en.cppreference.com/w/cpp/named_req/Formatter">Formatter</a> named
+requirement I believe).</p>
+
+<h2 id="conclusion">Conclusion</h2>
+
+<p>So, what <em>is</em> a <code class="language-plaintext highlighter-rouge">std::indirect&lt;T&gt;</code>? I’d like to think it is just a <code class="language-plaintext highlighter-rouge">T</code>,
+conceptually, holding the same values as <code class="language-plaintext highlighter-rouge">T</code>.</p>
+
+<p>This paragraph from p3019r13 makes me think I’m on the right track:</p>
+
+<blockquote>
+  <p>Both <code class="language-plaintext highlighter-rouge">indirect</code> and <code class="language-plaintext highlighter-rouge">polymorphic</code> have a valueless state that is used to
+implement move. The valueless state is not intended to be observable to the
+user. There is no <code class="language-plaintext highlighter-rouge">operator bool</code> or <code class="language-plaintext highlighter-rouge">has_value</code> member function. Accessing
+the value of an <code class="language-plaintext highlighter-rouge">indirect</code> or <code class="language-plaintext highlighter-rouge">polymorphic</code> after it has been moved from is
+undefined behaviour.</p>
+</blockquote>
+
+<p>Reducing UB in the spec of <code class="language-plaintext highlighter-rouge">indirect</code> was most likely motivated by making the
+class safe to use by generic algorithms, even those that may not always behave
+well while still being “correct” according to the standard. This doesn’t mean
+that <code class="language-plaintext highlighter-rouge">indirect</code>’s designers elevated the “valueless” state into a proper value.
+It’s even in the name!</p>
+
+<p>You should not even have to think about the valueless state in your code. Have
+<span style="white-space:nowrap;"><code class="language-plaintext highlighter-rouge">!valueless_after_move()</code></span> as an implicit precondition on all functions. Make
+sure you don’t maneuver yourself into a situation where you feel the need to
+check for the valueless state. If you absolutely need to deal with valueless
+<code class="language-plaintext highlighter-rouge">indirect</code>s, <em>don’t</em> rely on their behavior on assignment, comparison, etc.</p>
+
+<p>Knowing which values a type can hold is essential for reasoning about code.</p>
+
+<hr />
+
+<div class="footnotes" role="doc-endnotes">
+  <ol>
+    <li id="fn:1" role="doc-endnote">
+      <p>One reason they defined <code class="language-plaintext highlighter-rouge">NaN == NaN</code> to be <code class="language-plaintext highlighter-rouge">false</code>
+is for users to be able to distinguish NaN on machines/languages that don’t
+have a <code class="language-plaintext highlighter-rouge">IsNaN(x)</code> function (quote from
+<a href="https://people.eecs.berkeley.edu/~fateman/264/papers/ieee754.pdf">here</a>):</p>
+
+      <blockquote>
+        <p>The exceptions are C predicates <code class="language-plaintext highlighter-rouge">x == x</code> and <code class="language-plaintext highlighter-rouge">x != x</code>, which are
+respectively 1 and 0 for every
+infinite or finite number x but reverse if x is Not a Number (NaN); these
+provide the only simple unexceptional distinction between NaNs and numbers in
+languages that lack a word for NaN and a predicate IsNaN(x). Over-optimizing
+compilers that substitute 1 for <code class="language-plaintext highlighter-rouge">x == x</code> violate IEEE 754.</p>
+      </blockquote>
+      <p><a href="#fnref:1" class="reversefootnote" role="doc-backlink">&#8617;</a></p>
+    </li>
+    <li id="fn:2" role="doc-endnote">
+      <p>What all those operations have in common is that they:</p>
+
+      <ul>
+        <li>can be generated by the compiler (in principle, as <code class="language-plaintext highlighter-rouge">std::hash</code> currently is not)</li>
+        <li>operate memberwise</li>
+      </ul>
+
+      <p></p>
+      <p>Since they operate memberwise, they don’t neccesarily require “valid” objects as arguments,
+where “valid” means “valid value of the type”.
+They only need each member to also be “valid regarding the regular operations, but otherwise unspecified”.
+In this way, this property composes!</p>
+
+      <p>It slots right in between the well known basic guarantee, where all invariants of the object hold,
+and the <a href="https://youtu.be/OWsepDEh5lQ?t=2187">minimal guarantee</a>,
+where an object is just destructible (and I guess assignable-to).
+Maybe call this guarantee the “regular guarantee”? <a href="#fnref:2" class="reversefootnote" role="doc-backlink">&#8617;</a></p>
+    </li>
+  </ol>
+</div>
+
+  </div><a class="u-url" href="/blog/c++/2025/05/27/value-of-std-indirect" hidden></a>
+</article>
+
+      </div>
+    </main><footer class="site-footer h-card">
+  <data class="u-url" href="/blog/"></data>
+
+  <div class="wrapper">
+
+    <div class="footer-col-wrapper">
+      <div class="footer-col footer-col-1">
+        <ul class="contact-list">
+          <li class="p-name">Jan Kokemüller</li><li><a class="u-email" href="mailto:jan.kokemueller@gmail.com">jan.kokemueller@gmail.com</a></li></ul>
+      </div>
+
+      <div class="footer-col footer-col-2"><ul class="social-media-list"><li><a href="https://github.com/jiixyj"><svg class="svg-icon"><use xlink:href="/blog/assets/minima-social-icons.svg#github"></use></svg> <span class="username">jiixyj</span></a></li></ul>
+</div>
+
+      <div class="footer-col footer-col-3">
+        <p></p>
+      </div>
+    </div>
+
+  </div>
+
+</footer>
+</body>
+
+</html>

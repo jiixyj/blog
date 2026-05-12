@@ -1,4 +1,782 @@
-<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="3.10.0">Jekyll</generator><link href="/blog/feed.xml" rel="self" type="application/atom+xml" /><link href="/blog/" rel="alternate" type="text/html" /><updated>2025-10-16T22:54:39+02:00</updated><id>/blog/feed.xml</id><title type="html">Jan Kokemüller</title><author><name>Jan Kokemüller</name></author><entry><title type="html">Valid But Unspecified</title><link href="/blog/c++/2025/10/16/valid-but-unspecified" rel="alternate" type="text/html" title="Valid But Unspecified" /><published>2025-10-16T00:00:00+02:00</published><updated>2025-10-16T00:00:00+02:00</updated><id>/blog/c++/2025/10/16/valid-but-unspecified</id><content type="html" xml:base="/blog/c++/2025/10/16/valid-but-unspecified"><![CDATA[<p><em>Today, I was watching the talk “On coding guidelines, class invariants, and
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="3.10.0">Jekyll</generator><link href="/blog/feed.xml" rel="self" type="application/atom+xml" /><link href="/blog/" rel="alternate" type="text/html" /><updated>2026-05-12T08:54:03+02:00</updated><id>/blog/feed.xml</id><title type="html">Jan Kokemüller</title><author><name>Jan Kokemüller</name></author><entry><title type="html">Fixing `optional`’s Constructors and Comparison Operators</title><link href="/blog/c++/2026/05/12/fixing-optionals-constructors" rel="alternate" type="text/html" title="Fixing `optional`’s Constructors and Comparison Operators" /><published>2026-05-12T00:00:00+02:00</published><updated>2026-05-12T00:00:00+02:00</updated><id>/blog/c++/2026/05/12/fixing-optionals-constructors</id><content type="html" xml:base="/blog/c++/2026/05/12/fixing-optionals-constructors"><![CDATA[<script src="/blog/assets/js/mermaid.min.js" defer=""></script>
+
+<script type="module">
+  document.querySelectorAll(".language-mermaid").forEach(e => e.parentNode.replaceWith(Object.assign((function () {
+    var el = document.createElement("pre")
+    el.className = "mermaid"
+    return el
+  })(), {innerHTML: e.innerHTML})));
+</script>
+
+<p>What should happen when you construct an <code class="language-plaintext highlighter-rouge">optional&lt;T&gt;</code> from a value of type <code class="language-plaintext highlighter-rouge">U</code>?
+This is more tricky than it may seem. The standard got it wrong initially, and
+their fix is <em>still</em> slightly wrong! Barry Revzin provides an excellent rundown
+on this topic in his post
+<a href="https://brevzin.github.io/c++/2023/01/18/optional-construction/">“Getting in trouble with mixed construction”</a>.
+I highly recommend reading it before continuing on.</p>
+
+<h2 id="desired-behavior">Desired Behavior</h2>
+
+<p>If both <code class="language-plaintext highlighter-rouge">T</code> and <code class="language-plaintext highlighter-rouge">U</code> are not <code class="language-plaintext highlighter-rouge">optional</code>s, the result is probably what you would
+expect:</p>
+
+<div class="language-c++ highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kt">uint16_t</span> <span class="n">value</span> <span class="o">=</span> <span class="mi">42</span><span class="p">;</span>
+<span class="n">optional</span><span class="o">&lt;</span><span class="kt">uint32_t</span><span class="o">&gt;</span> <span class="n">opt</span> <span class="o">=</span> <span class="n">value</span><span class="p">;</span>
+</code></pre></div></div>
+
+<p>Mapping each source value to the corresponding target value gives this diagram:</p>
+
+<pre><code class="language-mermaid">block-beta
+    columns 6
+
+    o1["u16:"]:1
+    block:group2:5
+      space
+      o1v0["0"]
+      o1v1["1"]
+      o1v3["..."]
+      o1v5["65535"]
+      space
+      space
+      space
+    end
+
+    o2["opt&amp;lt;u32&amp;gt;:"]:1
+    block:group3:5
+      o2n00["&amp;empty;"]
+      o2v00["0"]
+      o2v01["1"]
+      o2v03["..."]
+      o2v05["65535"]
+      o2v06["65536"]
+      o2v07["..."]
+      o2v08["2&lt;sup&gt;32&lt;/sup&gt;-1"]
+    end
+
+    o1v0--&gt;o2v00
+    o1v1--&gt;o2v01
+    o1v3--&gt;o2v03
+    o1v5--&gt;o2v05
+
+    style o1    fill:#fff0,stroke:#fff0
+    style o2    fill:#fff0,stroke:#fff0
+    style o1v3  fill:#fff0,stroke:#fff0
+    style o2v03 fill:#fff0,stroke:#fff0
+    style o2v07 fill:#fff0,stroke:#fff0
+</code></pre>
+
+<p>This conversion can be done implicitly (i.e. with the <code class="language-plaintext highlighter-rouge">=</code> sign), as it is
+lossless and nothing unexpected happens.</p>
+
+<p>One key observation is that a conversion of this shape can always be done if the
+number of “<code class="language-plaintext highlighter-rouge">optional</code> layers” of the target type is bigger than that of the
+source type.</p>
+
+<p>For example:</p>
+
+<div class="language-c++ highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">optional</span><span class="o">&lt;</span><span class="kt">uint16_t</span><span class="o">&gt;</span> <span class="n">value</span> <span class="o">=</span> <span class="mi">42</span><span class="p">;</span>
+<span class="n">optional</span><span class="o">&lt;</span><span class="n">optional</span><span class="o">&lt;</span><span class="n">optional</span><span class="o">&lt;</span><span class="kt">uint32_t</span><span class="o">&gt;&gt;&gt;</span> <span class="n">opt</span> <span class="o">=</span> <span class="n">value</span><span class="p">;</span>
+</code></pre></div></div>
+
+<p>Visualized:</p>
+
+<pre><code class="language-mermaid">block-beta
+    columns 6
+
+    o1["opt&amp;lt;u16&amp;gt;:"]:1
+    block:group2:5
+      space
+      space
+      o1n0["&amp;empty;"]
+      o1v0["0"]
+      o1v3["..."]
+      o1v5["65535"]
+      space
+      space
+    end
+
+    o2["opt&amp;lt;opt&amp;lt;opt&amp;lt;u32&amp;gt;&amp;gt;&amp;gt;:"]:1
+    block:group3:5
+      o2n02["&amp;empty;&lt;sub&gt;2&lt;/sub&gt;"]
+      o2n01["&amp;empty;&lt;sub&gt;1&lt;/sub&gt;"]
+      o2n00["&amp;empty;&lt;sub&gt;0&lt;/sub&gt;"]
+      o2v00["0"]
+      o2v03["..."]
+      o2v05["65535"]
+      o2v07["..."]
+      o2v08["2&lt;sup&gt;32&lt;/sup&gt;-1"]
+    end
+
+    o1n0--&gt;o2n00
+    o1v0--&gt;o2v00
+    o1v3--&gt;o2v03
+    o1v5--&gt;o2v05
+
+    style o1    fill:#fff0,stroke:#fff0
+    style o2    fill:#fff0,stroke:#fff0
+    style o1v3  fill:#fff0,stroke:#fff0
+    style o2v03 fill:#fff0,stroke:#fff0
+    style o2v07 fill:#fff0,stroke:#fff0
+</code></pre>
+
+<p>Viewing it like this, making the “base type” wider (in this example using a
+<code class="language-plaintext highlighter-rouge">uint64_t</code> instead of a <code class="language-plaintext highlighter-rouge">uint32_t</code>) adds new possible values on the right,
+while adding another “<code class="language-plaintext highlighter-rouge">optional</code> layer” adds one additional “none value” on the
+left (naming them “∅<sub>0</sub>”, “∅<sub>1</sub>”, “∅<sub>2</sub>”, and so
+on).</p>
+
+<p>There should be no surprise when extending this mental model for the case when
+the number of <code class="language-plaintext highlighter-rouge">optional</code> layers is the same:</p>
+
+<div class="language-c++ highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">optional</span><span class="o">&lt;</span><span class="kt">uint16_t</span><span class="o">&gt;</span> <span class="n">value</span> <span class="o">=</span> <span class="mi">42</span><span class="p">;</span>
+<span class="n">optional</span><span class="o">&lt;</span><span class="kt">uint32_t</span><span class="o">&gt;</span> <span class="n">opt</span> <span class="o">=</span> <span class="n">value</span><span class="p">;</span>
+</code></pre></div></div>
+
+<pre><code class="language-mermaid">block-beta
+    columns 6
+
+    o1["opt&amp;lt;u16&amp;gt;:"]:1
+    block:group2:5
+      o1n0["&amp;empty;"]
+      o1v0["0"]
+      o1v1["1"]
+      o1v3["..."]
+      o1v5["65535"]
+      space
+      space
+      space
+    end
+
+    o2["opt&amp;lt;u32&amp;gt;:"]:1
+    block:group3:5
+      o2n00["&amp;empty;"]
+      o2v00["0"]
+      o2v01["1"]
+      o2v03["..."]
+      o2v05["65535"]
+      o2v06["65536"]
+      o2v07["..."]
+      o2v08["2&lt;sup&gt;32&lt;/sup&gt;-1"]
+    end
+
+    o1n0--&gt;o2n00
+    o1v0--&gt;o2v00
+    o1v1--&gt;o2v01
+    o1v3--&gt;o2v03
+    o1v5--&gt;o2v05
+
+    style o1    fill:#fff0,stroke:#fff0
+    style o2    fill:#fff0,stroke:#fff0
+    style o1v3  fill:#fff0,stroke:#fff0
+    style o2v03 fill:#fff0,stroke:#fff0
+    style o2v07 fill:#fff0,stroke:#fff0
+</code></pre>
+
+<p>It should even work when the target base type is “narrower” than the source
+base type:</p>
+
+<div class="language-c++ highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">optional</span><span class="o">&lt;</span><span class="kt">uint16_t</span><span class="o">&gt;</span> <span class="n">value</span> <span class="o">=</span> <span class="mi">42</span><span class="p">;</span>
+<span class="n">optional</span><span class="o">&lt;</span><span class="kt">bool</span><span class="o">&gt;</span> <span class="n">opt</span><span class="p">{</span><span class="n">value</span><span class="p">};</span>
+</code></pre></div></div>
+
+<p>We used braces to make it clear to the reader that something “unusual” happened
+here: the narrowing conversion from <code class="language-plaintext highlighter-rouge">uint16_t</code> to <code class="language-plaintext highlighter-rouge">bool</code>. Still, the “none”
+value of the source type should definitely map to the “none” value of the
+target!</p>
+
+<pre><code class="language-mermaid">block-beta
+    columns 6
+
+    o1["opt&amp;lt;u16&amp;gt;:"]:1
+    block:group3:5
+      o1n00["&amp;empty;"]
+      o1v00["0"]
+      o1v01["1"]
+      o1v02["2"]
+      o1v03["3"]
+      o1v04["..."]
+      o1v05["65534"]
+      o1v06["65535"]
+    end
+
+    o2["opt&amp;lt;bool&amp;gt;:"]:1
+    block:group2:5
+      o2n0["&amp;empty;"]
+      o2v0["false"]
+      o2v1["true"]
+      space
+      space
+      space
+      space
+      space
+    end
+
+    o1n00--&gt;o2n0
+    o1v00--&gt;o2v0
+    o1v01--&gt;o2v1
+    o1v02--&gt;o2v1
+    o1v03--&gt;o2v1
+    o1v04--&gt;o2v1
+    o1v05--&gt;o2v1
+    o1v06--&gt;o2v1
+
+    style o1    fill:#fff0,stroke:#fff0
+    style o2    fill:#fff0,stroke:#fff0
+    style o1v04 fill:#fff0,stroke:#fff0
+</code></pre>
+
+<h2 id="what-the-standard-gets-wrong">What the Standard Gets Wrong</h2>
+
+<p>The above should also work if the target base type is <code class="language-plaintext highlighter-rouge">std::any</code>. <code class="language-plaintext highlighter-rouge">std::any</code> is
+a value type, containing (<code class="language-plaintext highlighter-rouge">std::type_info</code>, “value of type <code class="language-plaintext highlighter-rouge">T</code>”) pairs for any
+copyable type <code class="language-plaintext highlighter-rouge">T</code> as its values <sup id="fnref:1" role="doc-noteref"><a href="#fn:1" class="footnote" rel="footnote">1</a></sup>.</p>
+
+<pre><code class="language-mermaid">block-beta
+    columns 6
+
+    o1["opt&amp;lt;u16&amp;gt;:"]:1
+    block:group3:5
+      o1n00["&amp;empty;"]
+      o1v00["0"]
+      o1v01["1"]
+      o1v02["2"]
+      o1v03["..."]
+      o1v04["65534"]
+      o1v05["65535"]
+      space
+    end
+
+    o2["opt&amp;lt;any&amp;gt;:"]:1
+    block:group2:5
+      o2n0["&amp;empty;"]
+      o2v0["u16,\n0"]
+      o2v1["u16,\n1"]
+      o2v2["u16,\n2"]
+      o2v3["..."]
+      o2v4["u16,\n65534"]
+      o2v5["u16,\n65535"]
+      o2v6["..."]
+    end
+
+    o1n00--&gt;o2n0
+    o1v00--&gt;o2v0
+    o1v01--&gt;o2v1
+    o1v02--&gt;o2v2
+    o1v04--&gt;o2v4
+    o1v05--&gt;o2v5
+
+    style o1    fill:#fff0,stroke:#fff0
+    style o2    fill:#fff0,stroke:#fff0
+    style o1v03 fill:#fff0,stroke:#fff0
+    style o2v3  fill:#fff0,stroke:#fff0
+    style o2v6  fill:#fff0,stroke:#fff0
+</code></pre>
+
+<p>Sadly, this is not what happens in the standard. <code class="language-plaintext highlighter-rouge">std::optional</code> maps the values
+like the following, which is inconsistent compared to the behavior of the
+<code class="language-plaintext highlighter-rouge">optional&lt;uint16_t&gt;</code> → <code class="language-plaintext highlighter-rouge">optional&lt;uint32_t&gt;</code> conversion above:</p>
+
+<pre><code class="language-mermaid">block-beta
+    columns 6
+
+    o1["opt&amp;lt;u16&amp;gt;:"]:1
+    block:group3:5
+      space
+      o1n00["&amp;empty;"]
+      o1v00["0"]
+      o1v01["1"]
+      o1v03["..."]
+      o1v04["65534"]
+      o1v05["65535"]
+      space
+    end
+
+    o2["opt&amp;lt;any&amp;gt;:"]:1
+    block:group2:5
+      o2n0["&amp;empty;"]
+      o2v0["opt&amp;lt;u16&amp;gt;,\n&amp;empty;"]
+      o2v1["opt&amp;lt;u16&amp;gt;,\n0"]
+      o2v2["opt&amp;lt;u16&amp;gt;,\n1"]
+      o2v4[".."]
+      o2v5["opt&amp;lt;u16&amp;gt;,\n65534"]
+      o2v6["opt&amp;lt;u16&amp;gt;,\n65535"]
+      o2v7["..."]
+    end
+
+    o1n00--&gt;o2v0
+    o1v00--&gt;o2v1
+    o1v01--&gt;o2v2
+    o1v04--&gt;o2v5
+    o1v05--&gt;o2v6
+
+    style o1    fill:#fff0,stroke:#fff0
+    style o2    fill:#fff0,stroke:#fff0
+    style o1v03 fill:#fff0,stroke:#fff0
+    style o2v4  fill:#fff0,stroke:#fff0
+    style o2v7  fill:#fff0,stroke:#fff0
+</code></pre>
+
+<p>This happens because <code class="language-plaintext highlighter-rouge">std::optional</code> has two “kinds” of constructors, and the
+logic that chooses between them is slightly broken. Those two “kinds” are:</p>
+
+<ul>
+  <li>
+    <p>Its “value” constructor, constructing an always engaged <code class="language-plaintext highlighter-rouge">optional</code> from a
+value. Simplified:</p>
+
+    <div class="language-c++ highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">template</span><span class="o">&lt;</span><span class="k">class</span> <span class="nc">U</span><span class="p">&gt;</span>
+<span class="n">optional</span><span class="p">(</span><span class="k">const</span> <span class="n">U</span><span class="o">&amp;</span> <span class="n">u</span><span class="p">)</span> <span class="o">:</span> <span class="n">t_</span><span class="p">(</span><span class="n">u</span><span class="p">),</span> <span class="n">is_engaged_</span><span class="p">{</span><span class="nb">true</span><span class="p">}</span> <span class="p">{</span> <span class="p">}</span>
+</code></pre></div>    </div>
+  </li>
+  <li>
+    <p>Its “converting” <sup id="fnref:2" role="doc-noteref"><a href="#fn:2" class="footnote" rel="footnote">2</a></sup> constructor, taking another <code class="language-plaintext highlighter-rouge">optional</code> and setting its own
+“engaged” flag accordingly. Simplified:</p>
+
+    <div class="language-c++ highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">template</span><span class="o">&lt;</span><span class="k">class</span> <span class="nc">U</span><span class="p">&gt;</span>
+<span class="n">optional</span><span class="p">(</span><span class="k">const</span> <span class="n">optional</span><span class="o">&lt;</span><span class="n">U</span><span class="o">&gt;&amp;</span> <span class="n">u</span><span class="p">)</span> <span class="o">:</span> <span class="n">is_engaged_</span><span class="p">{</span><span class="n">u</span><span class="p">.</span><span class="n">has_value</span><span class="p">()}</span> <span class="p">{</span>
+  <span class="k">if</span> <span class="p">(</span><span class="n">is_engaged_</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">new</span> <span class="p">(</span><span class="o">&amp;</span><span class="n">t_</span><span class="p">)</span> <span class="n">T</span><span class="p">(</span><span class="o">*</span><span class="n">u</span><span class="p">);</span>
+  <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>    </div>
+  </li>
+</ul>
+
+<p>The default C++ overload resolution rules will prefer the second (converting)
+constructor for arguments of some <code class="language-plaintext highlighter-rouge">optional</code> type, because it is more
+specialized. This is not always what we want, though. So the standard added
+<a href="https://eel.is/c++draft/optional#ctor-23.4">a</a>
+<a href="https://eel.is/c++draft/optional#ctor-28.2">bunch</a>
+<a href="https://eel.is/c++draft/optional#ctor-33.2">of</a>
+rules on top, trying to nudge the compiler in the “right” direction. Sadly,
+those fixes are incomplete and have weird behavior on their own.</p>
+
+<h2 id="a-possible-fix">A Possible Fix</h2>
+
+<p>To really get hold of the problem we can try listing all possible cases when
+trying to convert a <code class="language-plaintext highlighter-rouge">U</code> to an <code class="language-plaintext highlighter-rouge">optional&lt;T&gt;</code>. Doing a pattern match on both <code class="language-plaintext highlighter-rouge">U</code>
+and <code class="language-plaintext highlighter-rouge">T</code> leads to four cases which I list in the table below. Why four? Both <code class="language-plaintext highlighter-rouge">T</code>
+and <code class="language-plaintext highlighter-rouge">U</code> can either be another <code class="language-plaintext highlighter-rouge">optional</code> type or not. So we
+have <math><mn>2</mn><mo>&sdot;</mo><mn>2</mn><mo>=</mo><mn>4</mn></math>
+possible combinations.</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">U</code>/<code class="language-plaintext highlighter-rouge">T</code>: types that can be anything, even another <code class="language-plaintext highlighter-rouge">optional</code></li>
+  <li><code class="language-plaintext highlighter-rouge">UV</code>/<code class="language-plaintext highlighter-rouge">TV</code>: types that are not <code class="language-plaintext highlighter-rouge">optional</code></li>
+  <li>→: “converts to”</li>
+</ul>
+
+<table>
+  <thead>
+    <tr>
+      <th>case</th>
+      <th><code class="language-plaintext highlighter-rouge">U</code> → <code class="language-plaintext highlighter-rouge">opt&lt;T&gt;</code></th>
+      <th>constructor used</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>1</td>
+      <td><code class="language-plaintext highlighter-rouge">UV</code>  → <code class="language-plaintext highlighter-rouge">opt&lt;TV&gt;</code></td>
+      <td>“value”</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td><code class="language-plaintext highlighter-rouge">UV</code>  → <code class="language-plaintext highlighter-rouge">opt&lt;opt&lt;T&gt;&gt;</code></td>
+      <td>“value”</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td><code class="language-plaintext highlighter-rouge">opt&lt;U&gt;</code> → <code class="language-plaintext highlighter-rouge">opt&lt;TV&gt;</code></td>
+      <td>“converting”</td>
+    </tr>
+    <tr>
+      <td>4a</td>
+      <td><code class="language-plaintext highlighter-rouge">opt&lt;U&gt;</code> → <code class="language-plaintext highlighter-rouge">opt&lt;opt&lt;T&gt;&gt;</code></td>
+      <td>“value” when <code class="language-plaintext highlighter-rouge">U</code> → <code class="language-plaintext highlighter-rouge">opt&lt;T&gt;</code> is “value”</td>
+    </tr>
+    <tr>
+      <td>4b</td>
+      <td><code class="language-plaintext highlighter-rouge">opt&lt;U&gt;</code> → <code class="language-plaintext highlighter-rouge">opt&lt;opt&lt;T&gt;&gt;</code></td>
+      <td>“converting”  when <code class="language-plaintext highlighter-rouge">U</code> → <code class="language-plaintext highlighter-rouge">opt&lt;T&gt;</code> is “converting”</td>
+    </tr>
+  </tbody>
+</table>
+
+<ul>
+  <li>case 1: This is the simplest case, where we have a non-<code class="language-plaintext highlighter-rouge">optional</code> type trying
+to convert to a <code class="language-plaintext highlighter-rouge">optional</code> of a non-<code class="language-plaintext highlighter-rouge">optional</code> type. Example:
+<code class="language-plaintext highlighter-rouge">int</code> → <code class="language-plaintext highlighter-rouge">optional&lt;long&gt;</code>. This will work if <code class="language-plaintext highlighter-rouge">int</code> converts to <code class="language-plaintext highlighter-rouge">long</code> (which
+in this example it will).</li>
+  <li>case 2: This is like case 1, just that at least one additional
+“<code class="language-plaintext highlighter-rouge">optional</code> layer” is involved in the target type.
+This recurses to case 1 or 2.</li>
+  <li>case 3: Here, we are trying to convert from an <code class="language-plaintext highlighter-rouge">optional&lt;U&gt;</code> to an
+<code class="language-plaintext highlighter-rouge">optional&lt;TV&gt;</code>, where <code class="language-plaintext highlighter-rouge">TV</code> is <em>not</em> an <code class="language-plaintext highlighter-rouge">optional</code>, but <code class="language-plaintext highlighter-rouge">U</code> might be. This is,
+again, (hopefully) uncontroversial: It is the “converting” case. Note that we
+don’t want to allow any weird conversions to <code class="language-plaintext highlighter-rouge">bool</code>, for example
+<code class="language-plaintext highlighter-rouge">optional&lt;vector&lt;int&gt;&gt;</code> → <code class="language-plaintext highlighter-rouge">optional&lt;bool&gt;</code>. This should not be allowed to
+compile, just like trying to convert a <code class="language-plaintext highlighter-rouge">vector&lt;int&gt;</code> to a <code class="language-plaintext highlighter-rouge">bool</code> does not
+compile.</li>
+  <li>case 4: This is an interesting case. First, we can strip away one layer of
+<code class="language-plaintext highlighter-rouge">optional</code> from each side, giving us again <code class="language-plaintext highlighter-rouge">U</code> → <code class="language-plaintext highlighter-rouge">opt&lt;T&gt;</code>. We can ask the
+table for an answer recursively:
+    <ul>
+      <li>case 4a: If the answer is “value”, we know that the inner <code class="language-plaintext highlighter-rouge">U</code> converts to
+the inner <code class="language-plaintext highlighter-rouge">T</code>. But we have an <code class="language-plaintext highlighter-rouge">opt&lt;U&gt;</code>, not just a <code class="language-plaintext highlighter-rouge">U</code>. We have two
+possibilities to map the “none” value of the <code class="language-plaintext highlighter-rouge">opt&lt;U&gt;</code> to <code class="language-plaintext highlighter-rouge">opt&lt;opt&lt;T&gt;&gt;</code>: The
+“outer” none value or the “inner” none value. To me, mapping it to the
+“inner” none value feels like the more natural choice. Taken together, we
+map the whole <code class="language-plaintext highlighter-rouge">opt&lt;U&gt;</code> to the inner <code class="language-plaintext highlighter-rouge">opt&lt;T&gt;</code>, resulting in a “value” case.
+Example:
+        <ul>
+          <li><code class="language-plaintext highlighter-rouge">optional&lt;int&gt;</code> → <code class="language-plaintext highlighter-rouge">optional&lt;optional&lt;long&gt;&gt;</code> is “value”</li>
+          <li>…as <code class="language-plaintext highlighter-rouge">int</code> → <code class="language-plaintext highlighter-rouge">optional&lt;long&gt;</code> gives “value”</li>
+          <li>…so we can convert <code class="language-plaintext highlighter-rouge">optional&lt;int&gt;</code> to <code class="language-plaintext highlighter-rouge">optional&lt;long&gt;</code>, mapping our
+none value to the target none value</li>
+          <li>…so <code class="language-plaintext highlighter-rouge">optional&lt;int&gt;</code> converts to an always engaged
+<code class="language-plaintext highlighter-rouge">optional&lt;optional&lt;long&gt;&gt;</code></li>
+        </ul>
+      </li>
+      <li>case 4b: If the answer is “converting”, we know that the inner <code class="language-plaintext highlighter-rouge">U</code> maps to
+<code class="language-plaintext highlighter-rouge">opt&lt;T&gt;</code>.
+Thus, to map our “none” value, there is just one possibility left: The
+“outer” none value of the <code class="language-plaintext highlighter-rouge">opt&lt;opt&lt;T&gt;&gt;</code>. This results in a “converting”
+case. Example:
+        <ul>
+          <li><code class="language-plaintext highlighter-rouge">optional&lt;optional&lt;int&gt;&gt;</code> → <code class="language-plaintext highlighter-rouge">optional&lt;optional&lt;long&gt;&gt;</code> is “converting”</li>
+          <li>…as <code class="language-plaintext highlighter-rouge">optional&lt;int&gt;</code> → <code class="language-plaintext highlighter-rouge">optional&lt;long&gt;</code> is “converting”</li>
+          <li>…so we can add an <code class="language-plaintext highlighter-rouge">optional</code> layer to both sides, and the answer stays
+“converting”</li>
+        </ul>
+      </li>
+    </ul>
+  </li>
+</ul>
+
+<p>Looking at the table, we can even recognize our earlier intuition that the
+“value” case is equivalent to the case where the number of “<code class="language-plaintext highlighter-rouge">optional</code> layers”
+of the target is greater than the source:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>case</th>
+      <th><code class="language-plaintext highlighter-rouge">U</code> → <code class="language-plaintext highlighter-rouge">opt&lt;T&gt;</code></th>
+      <th>constructor used</th>
+      <th>number of <code class="language-plaintext highlighter-rouge">optional</code> layers <br /> (target vs. source)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>1</td>
+      <td><code class="language-plaintext highlighter-rouge">UV</code>  → <code class="language-plaintext highlighter-rouge">opt&lt;TV&gt;</code></td>
+      <td>“value”</td>
+      <td>&gt;</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td><code class="language-plaintext highlighter-rouge">UV</code>  → <code class="language-plaintext highlighter-rouge">opt&lt;opt&lt;T&gt;&gt;</code></td>
+      <td>“value”</td>
+      <td>&gt;</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td><code class="language-plaintext highlighter-rouge">opt&lt;U&gt;</code> → <code class="language-plaintext highlighter-rouge">opt&lt;TV&gt;</code></td>
+      <td>“converting”</td>
+      <td>≤</td>
+    </tr>
+    <tr>
+      <td>4a</td>
+      <td><code class="language-plaintext highlighter-rouge">opt&lt;U&gt;</code> → <code class="language-plaintext highlighter-rouge">opt&lt;opt&lt;T&gt;&gt;</code></td>
+      <td>“value”</td>
+      <td>&gt;</td>
+    </tr>
+    <tr>
+      <td>4b</td>
+      <td><code class="language-plaintext highlighter-rouge">opt&lt;U&gt;</code> → <code class="language-plaintext highlighter-rouge">opt&lt;opt&lt;T&gt;&gt;</code></td>
+      <td>“converting”</td>
+      <td>≤</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Cases 1, 2 and 3 are the base cases, and both 4a and 4b just add an <code class="language-plaintext highlighter-rouge">optional</code>
+layer to each side, so the relation between the number of <code class="language-plaintext highlighter-rouge">optional</code> layers
+stays the same.</p>
+
+<p>So we can simplify the whole thing and just ask: “Is the number of <code class="language-plaintext highlighter-rouge">optional</code>
+layers of the target type greater than that of the source type?” If yes, choose
+the “value” constructor.</p>
+
+<p>I think this is a very simple and intuitive rule, but it also means that we
+cannot simply use C++’s normal overload resolution rules for our constructors.
+We have to take the number of <code class="language-plaintext highlighter-rouge">optional</code> layers of our <code class="language-plaintext highlighter-rouge">T</code> into account as
+well.</p>
+
+<p>Inside our <code class="language-plaintext highlighter-rouge">optional&lt;T&gt;</code>, the check for the “value”/”converting” constructor
+could look like this:</p>
+
+<div class="language-c++ highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">template</span> <span class="o">&lt;</span><span class="k">class</span> <span class="nc">U</span><span class="p">&gt;</span>
+<span class="k">static</span> <span class="k">constexpr</span> <span class="kt">bool</span> <span class="n">use_value_constructor</span> <span class="o">=</span>
+    <span class="n">count_optional_layers</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span><span class="p">()</span> <span class="o">&gt;=</span> <span class="n">count_optional_layers</span><span class="o">&lt;</span><span class="n">U</span><span class="o">&gt;</span><span class="p">();</span>
+</code></pre></div></div>
+
+<p>This corresponds to cases 1, 2 and 4a of the table. I use <code class="language-plaintext highlighter-rouge">&gt;=</code> as this logic
+is inside a <code class="language-plaintext highlighter-rouge">optional&lt;T&gt;</code>, so one <code class="language-plaintext highlighter-rouge">optional</code> layer is already taken into
+account.</p>
+
+<p>All together, our two constructors look like this (simplified a bit). Both
+constructors take a forwarding reference as their argument, taking the
+problematic overload resolution rule out of the picture, and letting us
+“program” the rules ourselves:</p>
+
+<div class="language-c++ highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">//</span>
+<span class="c1">// "value" constructor</span>
+<span class="c1">//</span>
+<span class="k">template</span> <span class="o">&lt;</span><span class="k">class</span> <span class="nc">U</span><span class="p">&gt;</span>
+    <span class="k">requires</span><span class="p">(</span><span class="n">use_value_constructor</span><span class="o">&lt;</span><span class="n">U</span><span class="o">&gt;</span> <span class="o">&amp;&amp;</span> <span class="n">std</span><span class="o">::</span><span class="n">constructible_from</span><span class="o">&lt;</span><span class="n">T</span><span class="p">,</span> <span class="n">U</span><span class="o">&gt;</span><span class="p">)</span>
+<span class="k">constexpr</span> <span class="n">optional</span><span class="p">(</span><span class="n">U</span><span class="o">&amp;&amp;</span> <span class="n">u</span><span class="p">)</span>
+    <span class="o">:</span> <span class="cm">/* Construct engaged `optional` from `u`. */</span><span class="p">;</span>
+
+<span class="c1">//</span>
+<span class="c1">// "converting" constructor</span>
+<span class="c1">//</span>
+<span class="k">template</span> <span class="o">&lt;</span><span class="k">class</span> <span class="nc">U</span><span class="p">,</span> <span class="k">class</span> <span class="nc">UV</span> <span class="o">=</span> <span class="n">optional_value_type_t</span><span class="o">&lt;</span><span class="n">U</span><span class="p">&gt;</span><span class="o">&gt;</span>
+    <span class="k">requires</span><span class="p">(</span><span class="o">!</span><span class="n">use_value_constructor</span><span class="o">&lt;</span><span class="n">U</span><span class="o">&gt;</span> <span class="o">&amp;&amp;</span> <span class="n">std</span><span class="o">::</span><span class="n">constructible_from</span><span class="o">&lt;</span><span class="n">T</span><span class="p">,</span> <span class="n">UV</span><span class="o">&gt;</span><span class="p">)</span>
+<span class="k">constexpr</span> <span class="nf">optional</span><span class="p">(</span><span class="n">U</span><span class="o">&amp;&amp;</span> <span class="n">u</span><span class="p">)</span> <span class="c1">//</span>
+    <span class="o">:</span> <span class="cm">/* ... */</span>
+      <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">u</span><span class="p">.</span><span class="n">has_value</span><span class="p">())</span> <span class="p">{</span>
+          <span class="cm">/* Construct disengaged `optional`. */</span>
+      <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+          <span class="cm">/* Construct engaged `optional` from `*u`. */</span>
+      <span class="p">}</span>
+      <span class="cm">/* ... */</span><span class="p">;</span>
+</code></pre></div></div>
+
+<p>Those two constructors will always do the (in my opinion) sensible thing. Even
+if this might invoke <code class="language-plaintext highlighter-rouge">optional</code>’s <code class="language-plaintext highlighter-rouge">explicit operator bool()</code> in a case where
+the number of “<code class="language-plaintext highlighter-rouge">optional</code> layers” is reduced:</p>
+
+<div class="language-c++ highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">optional</span><span class="o">&lt;</span><span class="n">optional</span><span class="o">&lt;</span><span class="kt">uint32_t</span><span class="o">&gt;&gt;</span> <span class="n">value</span> <span class="o">=</span> <span class="mi">42</span><span class="p">;</span>
+<span class="n">optional</span><span class="o">&lt;</span><span class="kt">bool</span><span class="o">&gt;</span> <span class="n">opt</span><span class="p">{</span><span class="n">value</span><span class="p">};</span> <span class="c1">// note the braces, signalling an explicit conversion!</span>
+</code></pre></div></div>
+
+<p>Visualized:</p>
+
+<pre><code class="language-mermaid">block-beta
+    columns 6
+
+    o1["opt&amp;lt;opt&amp;lt;u32&amp;gt;&amp;gt;:"]:1
+    block:group3:5
+      o1n01["&amp;empty;&lt;sub&gt;1&lt;/sub&gt;"]
+      o1n00["&amp;empty;&lt;sub&gt;0&lt;/sub&gt;"]
+      o1v00["0"]
+      o1v01["1"]
+      o1v02["2"]
+      o1v03["..."]
+      o1v07["2&lt;sup&gt;32&lt;/sup&gt;-2"]
+      o1v08["2&lt;sup&gt;32&lt;/sup&gt;-1"]
+    end
+
+    o2["opt&amp;lt;bool&amp;gt;:"]:1
+    block:group2:5
+      o2n0["&amp;empty;"]
+      o2v0["false"]
+      o2v1["true"]
+      space
+      space
+      space
+      space
+      space
+    end
+
+    o1n01--&gt;o2n0
+    o1n00--&gt;o2v0
+    o1v00--&gt;o2v1
+    o1v01--&gt;o2v1
+    o1v02--&gt;o2v1
+    o1v03--&gt;o2v1
+    o1v07--&gt;o2v1
+    o1v08--&gt;o2v1
+
+    style o1    fill:#fff0,stroke:#fff0
+    style o2    fill:#fff0,stroke:#fff0
+    style o1v03 fill:#fff0,stroke:#fff0
+</code></pre>
+
+<p>This might seem weird at first, but it is just a consequence of <code class="language-plaintext highlighter-rouge">optional</code>
+having an explicit conversion to <code class="language-plaintext highlighter-rouge">bool</code>, thus falling into case 3 of the table.</p>
+
+<h2 id="mixed-comparisons">Mixed Comparisons</h2>
+
+<p>Closely related to initializing <code class="language-plaintext highlighter-rouge">optional</code>s there is the problem of comparing
+them. Why is this related to initialization? One useful mental model of
+comparing two different types in C++ is that this is valid if and only if one
+type implicitly converts into the other. As implicit conversions should be
+lossless, this always does what you expect.</p>
+
+<p>In practice, doing the work of initializing a temporary optional would be
+wasteful, though. So we might want to define our own comparison operators. This
+works, but we must ensure that the behavior is <em>identical</em> to the idealized
+mental model above. Otherwise, unexpected things can happen.</p>
+
+<p>Barry Revzin gave some very good examples in his post
+<a href="https://brevzin.github.io/c++/2018/12/09/mixed-comparisons/">“Getting in trouble with mixed comparisons”</a>.</p>
+
+<p>Let’s visualize what should happen. The first non-obvious example is <code class="language-plaintext highlighter-rouge">f5()</code>:</p>
+
+<div class="language-c++ highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kt">bool</span> <span class="nf">f5</span><span class="p">(</span><span class="n">optional</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span> <span class="n">a</span><span class="p">,</span> <span class="kt">long</span> <span class="n">b</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="n">a</span> <span class="o">==</span> <span class="n">b</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>Here are the types involved:</p>
+
+<pre><code class="language-mermaid">block-beta
+    columns 6
+
+    o1["long:"]:1
+    block:group2:5
+      space
+      o1v0["0"]
+      o1v1["1"]
+      o1v2["..."]
+      o1v4["INT_-\nMAX"]
+      o1v5["INT_-\nMAX+1"]
+      o1v6["..."]
+      o1v7["LONG_-\nMAX"]
+    end
+
+    o2["opt&amp;lt;int&amp;gt;:"]:1
+    block:group3:5
+      o2n00["&amp;empty;"]
+      o2v00["0"]
+      o2v01["1"]
+      o2v02["..."]
+      o2v03["INT_-\nMAX"]
+      space
+      space
+      space
+    end
+
+    style o1    fill:#fff0,stroke:#fff0
+    style o2    fill:#fff0,stroke:#fff0
+    style o1v2  fill:#fff0,stroke:#fff0
+    style o1v6  fill:#fff0,stroke:#fff0
+    style o2v02 fill:#fff0,stroke:#fff0
+</code></pre>
+
+<p>Due to the extra “none” value of the <code class="language-plaintext highlighter-rouge">optional&lt;int&gt;</code>, neither type is a
+superset of the other <sup id="fnref:3" role="doc-noteref"><a href="#fn:3" class="footnote" rel="footnote">3</a></sup>, therefore neither
+should implicitly convert into the other! This comparison should conservatively
+fail to compile. I guess one could try to implement a comparison operator that
+does the equivalent of converting both types to <code class="language-plaintext highlighter-rouge">optional&lt;long&gt;</code>, but this
+probably isn’t worth the trouble.</p>
+
+<p>The next example is <code class="language-plaintext highlighter-rouge">f6()</code>:</p>
+
+<div class="language-c++ highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kt">bool</span> <span class="nf">f6</span><span class="p">(</span><span class="n">optional</span><span class="o">&lt;</span><span class="n">optional</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;&gt;</span> <span class="n">a</span><span class="p">,</span> <span class="n">optional</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span> <span class="n">b</span><span class="p">)</span> <span class="p">{</span>
+      <span class="k">return</span> <span class="n">a</span> <span class="o">==</span> <span class="n">b</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>What should <code class="language-plaintext highlighter-rouge">f6(nullopt, nullopt)</code> return? The result must be consistent with
+the behavior of the constructors. In the following visualization, the arrows
+symbolize the behavior of the constructor (<code class="language-plaintext highlighter-rouge">optional&lt;optional&lt;int&gt;&gt;</code>’s “value”
+constructor), and the red boxes mark the <code class="language-plaintext highlighter-rouge">nullopt</code> state of both types.</p>
+
+<pre><code class="language-mermaid">block-beta
+    columns 6
+
+    o1["opt&amp;lt;int&amp;gt;:"]:1
+    block:group2:5
+      space
+      o1n0["&amp;empty;"]
+      o1v0["0"]
+      o1v1["1"]
+      o1v2["2"]
+      o1v3["..."]
+      o1v4["INT_-\nMAX-1"]
+      o1v5["INT_-\nMAX"]
+    end
+
+    o2["opt&amp;lt;opt&amp;lt;int&amp;gt;&amp;gt;:"]:1
+    block:group3:5
+      o2n01["&amp;empty;&lt;sub&gt;1&lt;/sub&gt;"]
+      o2n00["&amp;empty;&lt;sub&gt;0&lt;/sub&gt;"]
+      o2v00["0"]
+      o2v01["1"]
+      o2v02["2"]
+      o2v03["..."]
+      o2v04["INT_-\nMAX-1"]
+      o2v05["INT_-\nMAX"]
+    end
+
+    style o1n0  fill:#FAA0A0
+    style o2n01 fill:#FAA0A0
+
+    o1n0--&gt;o2n00
+    o1v0--&gt;o2v00
+    o1v1--&gt;o2v01
+    o1v2--&gt;o2v02
+    o1v3--&gt;o2v03
+    o1v4--&gt;o2v04
+    o1v5--&gt;o2v05
+
+    style o1    fill:#fff0,stroke:#fff0
+    style o2    fill:#fff0,stroke:#fff0
+    style o1v3  fill:#fff0,stroke:#fff0
+    style o2v03 fill:#fff0,stroke:#fff0
+</code></pre>
+
+<p>So the result of the comparison <em>must</em> be <code class="language-plaintext highlighter-rouge">false</code>! Only if we had designed our
+constructors some other way, the result may be different.</p>
+
+<p>The standard again does the wrong thing here – by trying to optimize the
+comparisons, they introduced two overloads of <code class="language-plaintext highlighter-rouge">operator==</code>, one for
+<code class="language-plaintext highlighter-rouge">optional&lt;U&gt;</code> and one for other <code class="language-plaintext highlighter-rouge">U</code>s. C++’s overload resolution rules kick in,
+doing the wrong thing. Here is an example of a very bad thing happening:</p>
+
+<div class="language-c++ highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">std</span><span class="o">::</span><span class="n">optional</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span> <span class="n">b</span> <span class="o">=</span> <span class="p">{};</span>
+<span class="n">std</span><span class="o">::</span><span class="n">optional</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="n">optional</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;&gt;</span> <span class="n">a</span> <span class="o">=</span> <span class="n">b</span><span class="p">;</span>
+<span class="n">assert</span><span class="p">(</span><span class="n">a</span> <span class="o">==</span> <span class="n">b</span><span class="p">);</span> <span class="c1">// This will fire :(</span>
+</code></pre></div></div>
+
+<p>For a <a href="https://stepanovpapers.com/DeSt98.pdf">regular</a> type like
+<code class="language-plaintext highlighter-rouge">std::optional&lt;std::optional&lt;int&gt;&gt;</code>, this is really not acceptable. It violates
+axiom (1): <code class="language-plaintext highlighter-rouge">T a = b; assert(a==b);</code>.</p>
+
+<h2 id="conclusion">Conclusion</h2>
+
+<ul>
+  <li>There are clear and consistent rules of how to best initialize and compare
+<code class="language-plaintext highlighter-rouge">optional</code>-like types.</li>
+  <li>Sometimes, C++’s built-in overload resolution rules are not your friend.</li>
+  <li>When designing value types, draw diagrams to visualize the desired conversion
+rules, and “program” them yourself if needed.</li>
+</ul>
+
+<p>I’m curious what you think about those rules. Do they make sense to you? Can
+you still find cases that behave “unexpectedly”?</p>
+
+<hr />
+
+<div class="footnotes" role="doc-endnotes">
+  <ol>
+    <li id="fn:1" role="doc-endnote">
+      <p>…and a “none” state, queryable with <code class="language-plaintext highlighter-rouge">has_value()</code>. <a href="#fnref:1" class="reversefootnote" role="doc-backlink">&#8617;</a></p>
+    </li>
+    <li id="fn:2" role="doc-endnote">
+      <p>I’m putting “converting” in quotes, because the standard uses the term
+  “converting constructor” for all non-explicit constructors. See also the
+  recent <a href="https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2024/p3542r0.html">P3542</a>. <a href="#fnref:2" class="reversefootnote" role="doc-backlink">&#8617;</a></p>
+    </li>
+    <li id="fn:3" role="doc-endnote">
+      <p>if <code class="language-plaintext highlighter-rouge">sizeof(long) &gt; sizeof(int)</code> <a href="#fnref:3" class="reversefootnote" role="doc-backlink">&#8617;</a></p>
+    </li>
+  </ol>
+</div>]]></content><author><name>Jan Kokemüller</name></author><category term="c++" /><summary type="html"><![CDATA[]]></summary></entry><entry><title type="html">Valid But Unspecified</title><link href="/blog/c++/2025/10/16/valid-but-unspecified" rel="alternate" type="text/html" title="Valid But Unspecified" /><published>2025-10-16T00:00:00+02:00</published><updated>2025-10-16T00:00:00+02:00</updated><id>/blog/c++/2025/10/16/valid-but-unspecified</id><content type="html" xml:base="/blog/c++/2025/10/16/valid-but-unspecified"><![CDATA[<p><em>Today, I was watching the talk “On coding guidelines, class invariants, and
 special member functions” <sup id="fnref:0" role="doc-noteref"><a href="#fn:0" class="footnote" rel="footnote">1</a></sup> by Olivia Wasalski. It’s an excellent talk on
 issues surrounding moved from objects and the “valid but unspecified” state. Go
 watch it! In this post I’ll share my thoughts on what “valid but unspecified”
